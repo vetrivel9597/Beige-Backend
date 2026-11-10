@@ -1,0 +1,10 @@
+   <main style="text-align: center; border:0px solid #bc9018; max-width: 500px;margin: 0px auto;">
+        <h2 style=" text-align: center;">This is your OTP</h2>
+        <p style=" text-align: center;">Within few mins, this OTP will expire.</p>
+        <h1 style="margin : 20px auto; text-align: center;">{{validOTP}}</h1>
+
+
+        <footer style="margin-top: 20px; text-align: center; font-size: 12px;">
+            <p style=" text-align: center;  background-color: #f1f2f3; padding:15px 0px;">&copy; {{compName}} All rights reserved.</p>
+        </footer>
+    </main>
