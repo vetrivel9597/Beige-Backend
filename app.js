@@ -21,7 +21,8 @@ var app = express();
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.ADMIN_URL,
-  'http://localhost:5173'
+  'http://localhost:5173',
+  'https://w7rmnnqg-5173.inc1.devtunnels.ms'
 ]
   .flatMap((value) => String(value || '').split(','))
   .map((value) => value.trim())
