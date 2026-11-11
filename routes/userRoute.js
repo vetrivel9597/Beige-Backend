@@ -21,22 +21,42 @@ require('../config/environment');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 8 * 1024 * 1024,
+    fileSize: 50 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       "image/jpeg",
       "image/png",
       "image/webp",
+      "video/mp4",
+      "video/quicktime",
+      "video/webm",
+      "video/x-m4v",
+      "video/x-msvideo",
+      "video/x-matroska",
+      "video/3gpp",
     ];
 
-    if (!allowedTypes.includes(file.mimetype)) {
-      return cb(new Error("Only JPG, PNG and WEBP images are allowed."));
+    const allowedExtensions = /\.(jpe?g|png|webp|mp4|mov|webm|m4v|avi|mkv|3gp)$/i;
+
+    if (!allowedTypes.includes(file.mimetype) && !allowedExtensions.test(file.originalname || "")) {
+      return cb(new Error("Upload a supported image or video file."));
     }
 
     cb(null, true);
   },
 });
+
+const aiMediaUpload = (req, res, next) => {
+  upload.single("image")(req, res, (error) => {
+    if (!error) return next();
+
+    const message = error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE"
+      ? "Upload file must be 50 MB or smaller."
+      : error.message || "Unable to receive the uploaded media.";
+    return res.status(400).json({ success: false, message });
+  });
+};
 
 
 router.get('/api/blogs', async (req, res, next) => {
@@ -187,11 +207,11 @@ router.post('/delete-sitemap', require('../Middleware/adminAuth'), Userroute.del
 
 
 
-router.post("/skinAnalyze", upload.single("image"), AiController.SkinAnalyze
+router.post("/skinAnalyze", aiMediaUpload, AiController.SkinAnalyze
 );
 
 
-router.post("/makeupBaseAnalyze", upload.single("image"), AiController.MakeupAnalyze
+router.post("/makeupBaseAnalyze", aiMediaUpload, AiController.MakeupAnalyze
 );
 
 
