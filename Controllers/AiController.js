@@ -2,9 +2,10 @@ require("../config/environment");
 
 const Groq = require("groq-sdk");
 const multer = require("multer");
-const sharp = require("sharp"); // ✅ ADDED — was missing (MakeupAnalyze uses sharp)
+const sharp = require("sharp");
 const Product = require("../models/Product");
 const AIAnalysis = require("../models/AIAnalysis");
+const { getVisionImages, isImageFile, isVideoFile } = require("../utils/aiMedia");
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -244,21 +245,340 @@ const getRecommendedProducts = (
 
 
 
+// const SkinAnalyze = async (req, res) => {
+//   try {
+
+
+//     console.log('req---------------', req.body)
+//     console.log('reqfile---------------', req.file)
+
+//     if (!req.file) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Please upload a face image or video.",
+//       });
+//     }
+
+//     if (!isImageFile(req.file) && !isVideoFile(req.file)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Please upload a supported image or video.",
+//       });
+//     }
+
+//     if (!isVideoFile(req.file) && req.file.size > 10 * 1024 * 1024) {
+//       return res.status(400).json({ success: false, message: "Image size must be 10 MB or less." });
+//     }
+
+//     let answers = req.body.answers;
+
+//     if (typeof answers === "string") {
+//       try {
+//         answers = JSON.parse(answers);
+//       } catch {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Answers must be valid JSON.",
+//         });
+//       }
+//     }
+
+//     if (!Array.isArray(answers) || answers.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Please provide questionnaire answers.",
+//       });
+//     }
+
+//     const validAnswers = answers.every((item) => {
+//       return (
+//         item &&
+//         typeof item.question === "string" &&
+//         typeof item.answer === "string" &&
+//         ["Skin", "Hair"].includes(item.category) &&
+//         item.question.trim() &&
+//         item.answer.trim()
+//       );
+//     });
+
+//     if (!validAnswers) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid questionnaire answer format.",
+//       });
+//     }
+
+//     const products = await Product.find({
+//       productStatus: 1,
+//       quantity: { $gt: 0 },
+//     })
+//       .select(
+//         "productname description pagelink productimages price final_price category subCategory size shade productStatus quantity"
+//       )
+//       .limit(100)
+//       .lean();
+
+
+//     if (!products.length) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "No available products found.",
+//       });
+//     }
+
+//     const productCatalog = products.map((product) => ({
+//       productId: String(product._id),
+//       name: product.productname || "",
+//       description: (product.description || "").slice(0, 250),
+//       category: String(product.category || ""),
+//       subCategory: String(product.subCategory || ""),
+//       price: product.final_price ?? product.price ?? null,
+//     }));
+
+//     const visionImages = await getVisionImages(req.file);
+//     const mediaDescription = isVideoFile(req.file)
+//       ? "The uploaded video is represented by up to four sampled frames from its first 12 seconds. Analyze the visible appearance across those frames."
+//       : "Analyze the uploaded image.";
+
+//     const prompt = `
+// You are an expert cosmetic skincare and haircare recommendation assistant.
+
+// ${mediaDescription} Also use the questionnaire answers below.
+
+// USER ANSWERS:
+// ${JSON.stringify(answers)}
+
+// AVAILABLE DATABASE PRODUCTS:
+// ${JSON.stringify(productCatalog)}
+
+// IMPORTANT IMAGE RULES:
+// - Analyze only clearly visible cosmetic characteristics.
+// - Never diagnose diseases.
+// - Do not claim that image observations prove a skin type.
+// - Use questionnaire answers to assess skin type.
+// - Mention uncertainty when appropriate.
+// - Do not invent skin concerns.
+
+// SKIN ANALYSIS:
+// Identify at most 2 visible concerns.
+// Possible concerns include acne, blemishes, pigmentation,
+// uneven-looking tone, dryness, visible oiliness and dark circles.
+
+// HAIR ANALYSIS:
+// Use the hair questionnaire answers.
+// Do not claim to diagnose scalp conditions from the face photograph.
+// Do not invent hair characteristics that cannot be observed.
+
+// PRODUCT SELECTION RULES:
+// 1. Select products ONLY from the supplied database.
+// 2. Copy productId EXACTLY from the catalog.
+// 3. Never invent product IDs, names or prices.
+// 4. Recommend products matching the skin analysis and questionnaire.
+// 5. Prefer specific products for visible concerns when suitable.
+// 6. Recommend hair products only when their catalog information is relevant.
+// 7. Select a maximum of 3 products.
+// 8. If no suitable product exists, return an empty array.
+// 9. Never recommend an unavailable product.
+// 10. Do not recommend products just to fill the response.
+
+// ROUTINE:
+// - Maximum 2 morning steps.
+// - Maximum 2 night steps.
+// - Maximum 2 haircare steps.
+// - Maximum 2 general advice points.
+// - Keep descriptions concise.
+
+// Return valid JSON only in this structure:
+
+// {
+//   "skinAnalysis": {
+//     "skinType": "",
+//     "skinToneObservation": "",
+//     "visibleConcerns": [
+//       {
+//         "concern": "",
+//         "observation": "",
+//         "confidence": "low"
+//       }
+//     ],
+//     "imageQuality": "",
+//     "summary": ""
+//   },
+//   "hairAnalysis": {
+//     "hairType": "",
+//     "scalpCondition": "",
+//     "hairCondition": "",
+//     "summary": ""
+//   },
+//   "recommendations": {
+//     "morningRoutine": [],
+//     "nightRoutine": [],
+//     "hairCareRoutine": [],
+//     "generalAdvice": []
+//   },
+//   "recommendedProducts": [
+//     {
+//       "productId": "",
+//       "reason": "",
+//       "usage": "",
+//       "priority": "high"
+//     }
+//   ],
+//   "disclaimer": "This is an AI-generated cosmetic assessment, not a medical diagnosis."
+// }
+// `;
+
+//     const completion = await groq.chat.completions.create({
+//       model: "qwen/qwen3.8-27b",
+//       temperature: 0.1,
+//       max_completion_tokens: 1400,
+//       response_format: {
+//         type: "json_object",
+//       },
+//       messages: [
+//         {
+//           role: "system",
+//           content:
+//             "You are a careful cosmetic skincare and haircare assistant. Return valid JSON only. Never invent products or IDs.",
+//         },
+//         {
+//           role: "user",
+//           content: [
+//             {
+//               type: "text",
+//               text: prompt,
+//             },
+//             ...visionImages.map(({ buffer, mimeType }) => ({
+//               type: "image_url",
+//               image_url: {
+//                 url: `data:${mimeType};base64,${buffer.toString("base64")}`,
+//               },
+//             })),
+//           ],
+//         },
+//       ],
+//     });
+
+//     const choice = completion.choices?.[0];
+
+//     const aiContent = choice?.message?.content;
+
+//     if (!aiContent) {
+//       throw new Error("Groq returned an empty response.");
+//     }
+
+//     let aiResult;
+
+//     try {
+//       aiResult = JSON.parse(aiContent);
+//     } catch (error) {
+//       console.error("Invalid Groq JSON:", aiContent);
+//       throw new Error("Groq returned invalid JSON.");
+//     }
+
+//     const skinAnalysis = aiResult.skinAnalysis || {};
+//     const hairAnalysis = aiResult.hairAnalysis || {};
+//     const recommendations = aiResult.recommendations || {};
+
+
+
+
+//     const recommendedProducts = getRecommendedProducts(
+//       aiResult.recommendedProducts,
+//       products,
+//       skinAnalysis,
+//       hairAnalysis,
+//       answers
+//     );
+
+//     console.log(
+//       "FINAL RECOMMENDED PRODUCTS:",
+//       recommendedProducts.map((product) => ({
+//         id: product._id,
+//         name: product.productname,
+//       }))
+//     );
+
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Skin and hair analysis completed successfully.",
+//       data: {
+//         skinAnalysis,
+//         hairAnalysis,
+//         recommendations,
+//         recommendedProducts,
+//         disclaimer:
+//           aiResult.disclaimer ||
+//           "This is an AI-generated cosmetic assessment, not a medical diagnosis.",
+//       },
+//     });
+
+//   } catch (error) {
+//     console.error("Skin analysis error:", error);
+
+//     if (error instanceof multer.MulterError) {
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           error.code === "LIMIT_FILE_SIZE"
+//             ? "Image size must be 10 MB or video size must be 50 MB or less."
+//             : error.message,
+//       });
+//     }
+
+//     if (error.status === 429) {
+//       return res.status(429).json({
+//         success: false,
+//         message:
+//           "AI request limit reached. Please try again later.",
+//       });
+//     }
+
+//     if (error.status === 400) {
+//       return res.status(400).json({
+//         success: false,
+//         message: error.message || "Invalid AI request.",
+//       });
+//     }
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Unable to analyze your uploaded media right now.",
+//       error:
+//         process.env.NODE_ENV === "development"
+//           ? error.message
+//           : undefined,
+//     });
+//   }
+// };
+
+
+
+
 const SkinAnalyze = async (req, res) => {
   try {
-    console.log("========== SKIN ANALYSIS START ==========");
+    console.log("req---------------", req.body);
+    console.log("reqfile---------------", req.file);
 
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Please upload your face image.",
+        message: "Please upload a face image or video.",
       });
     }
 
-    if (!req.file.mimetype.startsWith("image/")) {
+    if (!isImageFile(req.file) && !isVideoFile(req.file)) {
       return res.status(400).json({
         success: false,
-        message: "Please upload a valid image.",
+        message: "Please upload a supported image or video.",
+      });
+    }
+
+    if (!isVideoFile(req.file) && req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: "Image size must be 10 MB or less.",
       });
     }
 
@@ -300,6 +620,8 @@ const SkinAnalyze = async (req, res) => {
       });
     }
 
+    // Fetch available products
+    // Changed limit from 100 to 20 to reduce prompt tokens
     const products = await Product.find({
       productStatus: 1,
       quantity: { $gt: 0 },
@@ -307,10 +629,8 @@ const SkinAnalyze = async (req, res) => {
       .select(
         "productname description pagelink productimages price final_price category subCategory size shade productStatus quantity"
       )
-      .limit(100)
+      .limit(20)
       .lean();
-
-    console.log("DATABASE PRODUCTS:", products.length);
 
     if (!products.length) {
       return res.status(404).json({
@@ -319,26 +639,66 @@ const SkinAnalyze = async (req, res) => {
       });
     }
 
+    // Prepare smaller product catalog
     const productCatalog = products.map((product) => ({
       productId: String(product._id),
       name: product.productname || "",
-      description: (product.description || "").slice(0, 250),
+      description: (product.description || "").slice(0, 100),
       category: String(product.category || ""),
       subCategory: String(product.subCategory || ""),
       price: product.final_price ?? product.price ?? null,
     }));
 
-    const base64Image = req.file.buffer.toString("base64");
+    // Get image/video frames
+    const visionImages = await getVisionImages(req.file);
 
-    const imageDataUrl =
-      `data:${req.file.mimetype};base64,${base64Image}`;
+    // Use maximum 2 frames for video and 1 for image
+    const selectedImages = visionImages.slice(
+      0,
+      isVideoFile(req.file) ? 2 : 1
+    );
 
+    if (!selectedImages.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Unable to extract images from uploaded media.",
+      });
+    }
+
+    // Reduce image resolution and size before sending to Groq
+    const optimizedImages = await Promise.all(
+      selectedImages.map(async ({ buffer }) => {
+        const optimizedBuffer = await sharp(buffer)
+          .rotate()
+          .resize({
+            width: 512,
+            height: 512,
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .jpeg({
+            quality: 65,
+          })
+          .toBuffer();
+
+        return {
+          buffer: optimizedBuffer,
+          mimeType: "image/jpeg",
+        };
+      })
+    );
+
+    const mediaDescription = isVideoFile(req.file)
+      ? "The uploaded video is represented by up to two sampled frames. Analyze the visible appearance across those frames."
+      : "Analyze the uploaded image.";
+
+    // AI prompt
     const prompt = `
 You are an expert cosmetic skincare and haircare recommendation assistant.
 
-Analyze the user's uploaded face image and questionnaire answers.
+${mediaDescription}
 
-USER ANSWERS:
+USER QUESTIONNAIRE ANSWERS:
 ${JSON.stringify(answers)}
 
 AVAILABLE DATABASE PRODUCTS:
@@ -346,40 +706,37 @@ ${JSON.stringify(productCatalog)}
 
 IMPORTANT IMAGE RULES:
 - Analyze only clearly visible cosmetic characteristics.
-- Never diagnose diseases.
-- Do not claim that image observations prove a skin type.
+- Never diagnose diseases or medical conditions.
+- Do not claim image observations prove a skin type.
 - Use questionnaire answers to assess skin type.
 - Mention uncertainty when appropriate.
 - Do not invent skin concerns.
 
 SKIN ANALYSIS:
-Identify at most 2 visible concerns.
-Possible concerns include acne, blemishes, pigmentation,
-uneven-looking tone, dryness, visible oiliness and dark circles.
+- Identify at most 2 visible concerns.
+- Consider acne, blemishes, pigmentation, uneven tone,
+  dryness, visible oiliness and dark circles.
+- Mention only clearly visible concerns.
 
 HAIR ANALYSIS:
-Use the hair questionnaire answers.
-Do not claim to diagnose scalp conditions from the face photograph.
-Do not invent hair characteristics that cannot be observed.
+- Use the hair questionnaire answers.
+- Do not claim to diagnose scalp conditions from a face image.
+- Do not invent unobservable hair characteristics.
 
-PRODUCT SELECTION RULES:
-1. Select products ONLY from the supplied database.
-2. Copy productId EXACTLY from the catalog.
-3. Never invent product IDs, names or prices.
-4. Recommend products matching the skin analysis and questionnaire.
-5. Prefer specific products for visible concerns when suitable.
-6. Recommend hair products only when their catalog information is relevant.
-7. Select a maximum of 3 products.
-8. If no suitable product exists, return an empty array.
-9. Never recommend an unavailable product.
-10. Do not recommend products just to fill the response.
+PRODUCT SELECTION:
+- Recommend products ONLY from the supplied database.
+- Copy productId exactly.
+- Never invent product IDs, names or prices.
+- Recommend relevant products based on the answers and analysis.
+- Recommend a maximum of 3 products.
+- Return an empty array if no suitable products exist.
 
 ROUTINE:
 - Maximum 2 morning steps.
 - Maximum 2 night steps.
 - Maximum 2 haircare steps.
 - Maximum 2 general advice points.
-- Keep descriptions concise.
+- Keep descriptions short.
 
 Return valid JSON only in this structure:
 
@@ -421,18 +778,23 @@ Return valid JSON only in this structure:
 }
 `;
 
+    // Groq AI request
     const completion = await groq.chat.completions.create({
       model: "qwen/qwen3.8-27b",
       temperature: 0.1,
-      max_completion_tokens: 1400,
+
+      // Reduced output tokens
+      max_completion_tokens: 900,
+
       response_format: {
         type: "json_object",
       },
+
       messages: [
         {
           role: "system",
           content:
-            "You are a careful cosmetic skincare and haircare assistant. Return valid JSON only. Never invent products or IDs.",
+            "You are a careful cosmetic skincare and haircare assistant. Return valid JSON only. Never invent products or IDs. Keep responses concise.",
         },
         {
           role: "user",
@@ -441,20 +803,18 @@ Return valid JSON only in this structure:
               type: "text",
               text: prompt,
             },
-            {
+            ...optimizedImages.map(({ buffer, mimeType }) => ({
               type: "image_url",
               image_url: {
-                url: imageDataUrl,
+                url: `data:${mimeType};base64,${buffer.toString("base64")}`,
               },
-            },
+            })),
           ],
         },
       ],
     });
 
     const choice = completion.choices?.[0];
-
-    console.log("GROQ FINISH REASON:", choice?.finish_reason);
 
     const aiContent = choice?.message?.content;
 
@@ -475,12 +835,7 @@ Return valid JSON only in this structure:
     const hairAnalysis = aiResult.hairAnalysis || {};
     const recommendations = aiResult.recommendations || {};
 
-    console.log(
-      "GROQ RAW PRODUCTS:",
-      aiResult.recommendedProducts
-    );
-
-
+    // Existing product recommendation logic
     const recommendedProducts = getRecommendedProducts(
       aiResult.recommendedProducts,
       products,
@@ -496,8 +851,6 @@ Return valid JSON only in this structure:
         name: product.productname,
       }))
     );
-
-    console.log("========== SKIN ANALYSIS END ==========");
 
     return res.status(200).json({
       success: true,
@@ -521,16 +874,34 @@ Return valid JSON only in this structure:
         success: false,
         message:
           error.code === "LIMIT_FILE_SIZE"
-            ? "Image size must be 8 MB or less."
+            ? "Image size must be 10 MB or video size must be 50 MB or less."
             : error.message,
       });
     }
 
+    // Improved Groq rate-limit handling
     if (error.status === 429) {
+      const groqErrorMessage =
+        error.error?.error?.message || error.message || "";
+
+      const retryAfter = Number(
+        error.headers?.get?.("retry-after") || 0
+      );
+
+      const isDailyLimit =
+        groqErrorMessage.toLowerCase().includes("tokens per day") ||
+        groqErrorMessage.toLowerCase().includes("token limit");
+
       return res.status(429).json({
         success: false,
-        message:
-          "AI request limit reached. Please try again later.",
+        message: isDailyLimit
+          ? "Daily AI token limit reached. Please try again after the quota resets."
+          : "AI rate limit reached. Please try again later.",
+        retryAfterSeconds: retryAfter,
+        retryAfterMinutes: Math.ceil(retryAfter / 60),
+        limitType: isDailyLimit
+          ? "daily_token_limit"
+          : "rate_limit",
       });
     }
 
@@ -543,7 +914,7 @@ Return valid JSON only in this structure:
 
     return res.status(500).json({
       success: false,
-      message: "Unable to analyze your image right now.",
+      message: "Unable to analyze your uploaded media right now.",
       error:
         process.env.NODE_ENV === "development"
           ? error.message
@@ -554,19 +925,23 @@ Return valid JSON only in this structure:
 
 
 
-
 const MakeupAnalyze = async (req, res) => {
   try {
     const { lipColor, foundationShade } = req.body;
 
-
-    console.log(' req.body---------',  req.body)
-
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Please upload your face image.",
+        message: "Please upload a face image or video.",
       });
+    }
+
+    if (!isImageFile(req.file) && !isVideoFile(req.file)) {
+      return res.status(400).json({ success: false, message: "Please upload a supported image or video." });
+    }
+
+    if (!isVideoFile(req.file) && req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: "Image size must be 10 MB or less." });
     }
 
     if (!lipColor || !foundationShade) {
@@ -576,26 +951,25 @@ const MakeupAnalyze = async (req, res) => {
       });
     }
 
-    const optimizedImage = await sharp(req.file.buffer)
-      .rotate()
-      .resize(1024, 1024, {
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .jpeg({
-        quality: 85,
-      })
-      .toBuffer();
-
-    const base64Image = optimizedImage.toString("base64");
-
-    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
+    const visionImages = await getVisionImages(req.file);
+    const optimizedImages = await Promise.all(visionImages.map(async ({ buffer }) =>
+      sharp(buffer)
+        .rotate()
+        .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer()
+    ));
+    const mediaDescription = isVideoFile(req.file)
+      ? "Analyze the uploaded video using the provided sampled frames, taken from its first 12 seconds."
+      : "Analyze the uploaded face image.";
 
     const prompt = `
 You are a professional makeup artist and cosmetic shade consultant.
 
-Your task is to analyze the uploaded face image and provide
+Your task is to analyze the uploaded face image or video and provide
 personalized FACE BASE MAKEUP recommendations.
+
+${mediaDescription}
 
 USER SELECTED MAKEUP:
 
@@ -727,12 +1101,12 @@ Never claim laboratory-level shade matching from a photograph.
               type: "text",
               text: prompt,
             },
-            {
+            ...optimizedImages.map((buffer) => ({
               type: "image_url",
               image_url: {
-                url: imageUrl,
+                url: `data:image/jpeg;base64,${buffer.toString("base64")}`,
               },
-            },
+            })),
           ],
         },
       ],
@@ -765,6 +1139,10 @@ Never claim laboratory-level shade matching from a photograph.
 
   } catch (error) {
     console.error("Makeup AI Analysis Error:", error);
+
+    if (error.status === 400) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
 
     return res.status(500).json({
       success: false,
