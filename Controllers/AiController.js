@@ -558,8 +558,7 @@ const getRecommendedProducts = (
 
 const SkinAnalyze = async (req, res) => {
   try {
-    console.log("req---------------", req.body);
-    console.log("reqfile---------------", req.file);
+
 
     if (!req.file) {
       return res.status(400).json({
@@ -620,8 +619,7 @@ const SkinAnalyze = async (req, res) => {
       });
     }
 
-    // Fetch available products
-    // Changed limit from 100 to 20 to reduce prompt tokens
+
     const products = await Product.find({
       productStatus: 1,
       quantity: { $gt: 0 },
@@ -639,7 +637,6 @@ const SkinAnalyze = async (req, res) => {
       });
     }
 
-    // Prepare smaller product catalog
     const productCatalog = products.map((product) => ({
       productId: String(product._id),
       name: product.productname || "",
@@ -649,10 +646,8 @@ const SkinAnalyze = async (req, res) => {
       price: product.final_price ?? product.price ?? null,
     }));
 
-    // Get image/video frames
     const visionImages = await getVisionImages(req.file);
 
-    // Use maximum 2 frames for video and 1 for image
     const selectedImages = visionImages.slice(
       0,
       isVideoFile(req.file) ? 2 : 1
@@ -665,7 +660,6 @@ const SkinAnalyze = async (req, res) => {
       });
     }
 
-    // Reduce image resolution and size before sending to Groq
     const optimizedImages = await Promise.all(
       selectedImages.map(async ({ buffer }) => {
         const optimizedBuffer = await sharp(buffer)
@@ -692,7 +686,6 @@ const SkinAnalyze = async (req, res) => {
       ? "The uploaded video is represented by up to two sampled frames. Analyze the visible appearance across those frames."
       : "Analyze the uploaded image.";
 
-    // AI prompt
     const prompt = `
 You are an expert cosmetic skincare and haircare recommendation assistant.
 
@@ -778,12 +771,10 @@ Return valid JSON only in this structure:
 }
 `;
 
-    // Groq AI request
     const completion = await groq.chat.completions.create({
       model: "qwen/qwen3.8-27b",
       temperature: 0.1,
 
-      // Reduced output tokens
       max_completion_tokens: 900,
 
       response_format: {
@@ -835,7 +826,6 @@ Return valid JSON only in this structure:
     const hairAnalysis = aiResult.hairAnalysis || {};
     const recommendations = aiResult.recommendations || {};
 
-    // Existing product recommendation logic
     const recommendedProducts = getRecommendedProducts(
       aiResult.recommendedProducts,
       products,
@@ -879,7 +869,6 @@ Return valid JSON only in this structure:
       });
     }
 
-    // Improved Groq rate-limit handling
     if (error.status === 429) {
       const groqErrorMessage =
         error.error?.error?.message || error.message || "";
@@ -1084,7 +1073,6 @@ Keep recommendations concise, specific and useful.
 Never claim laboratory-level shade matching from a photograph.
 `;
 
-    // Groq Vision API
     const completion = await groq.chat.completions.create({
       model: "qwen/qwen3.8-27b",
 

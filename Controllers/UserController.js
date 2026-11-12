@@ -7,6 +7,8 @@ const Product = require("../models/Product");
 const multer = require("multer");
 const Influencer = require("../models/Influencer")
 const Usercart = require("../models/usercart")
+const UserWishList = require("../models/whislist")
+
 const path = require('path');
 // const fs = require('node:fs');
 const nodemailer = require("nodemailer");
@@ -47,7 +49,11 @@ const Order = require("../models/Orders");
 const SellProduct = require('../models/sellProduct');
 const Offercontent = require('../models/Offercontent');
 const categorypagebanner = require('../models/categorypagebanner');
+
+
 // Sent OTP To Whatsapp & SMS
+
+
 const sendOTP = async (otp, mobile, purpose = 'Registration') => {
   const message = `Your NEWME ${purpose} verification code is ${otp}`;
   // console.log(otp)
@@ -103,6 +109,7 @@ function getDevTestLoginConfig() {
 // Accept a national number with a separate dial code or a number already in
 // international form. Return the number as E.164 for Twilio and its national
 // portion for the user record.
+
 function normalizeRegistrationPhone(mobile, dialCode) {
   const rawMobile = String(mobile || '').trim();
   const rawDialCode = String(dialCode || '').trim();
@@ -263,7 +270,6 @@ const userregister = async (req, res) => {
   }
 }
 
-//Login Route
 const loginemailmobile = async (req, res) => {
   try {
     const { email, mobile, password, localuser, dialCode } = req.body || {};
@@ -1129,8 +1135,6 @@ const resetpassword = async (req, res) => {
   }
 };
 
-// Forget & Reset Password
-
 const transporter = nodemailer.createTransport({
   host: `${process.env.SMTP_HOST}`,
   port: Number(process.env.SMTP_PORT),
@@ -1198,7 +1202,6 @@ const forgotpassword = async (req, res) => {
   }
 }
 
-//-----------------------END-----------------------------
 
 const homepage = async (req, res) => {
   try {
@@ -1271,7 +1274,6 @@ const userhomepage = async (req, res) => {
 
 
 const influencer = async (req, res) => {
-  // console.log("req.body", req.body);
   const {
     name,
     Email,
@@ -1908,7 +1910,6 @@ const getProfile = async (req, res) => {
 }
 
 const getWishlist = async (req, res) => {
-  // console.log("findWhislistdata===");
   let userID = res.locals.user_id;
 
   try {
@@ -2744,6 +2745,292 @@ const deletesitemap = async function (req, res) {
 };
 
 
+
+
+const cart = async (req, res) => {
+  try {
+    const { userid, productid, quantity, type } = req.body;
+
+    if (!userid) {
+      return res.status(400).json({
+        status: false,
+        message: "User ID is required"
+      });
+    }
+
+    if (type === "get") {
+      const getCart = await Usercart.findOne({ userid })
+        .populate("product.productid");
+
+      if (!getCart) {
+        return res.status(200).json({
+          status: true,
+          data: [],
+          message: "Your cart is empty"
+        });
+      }
+
+      return res.status(200).json({
+        status: true,
+        data: getCart,
+        message: "Your cart fetched successfully"
+      });
+    }
+
+
+    if (type === "post") {
+      if (!productid) {
+        return res.status(400).json({
+          status: false,
+          message: "Product ID is required"
+        });
+      }
+
+      const productQuantity = Number(quantity || 1);
+
+      if (!Number.isInteger(productQuantity) || productQuantity < 1) {
+        return res.status(400).json({
+          status: false,
+          message: "Quantity must be a valid positive number"
+        });
+      }
+
+      let existCart = await Usercart.findOne({ userid });
+
+      if (!existCart) {
+        existCart = new Usercart({
+          userid,
+          product: [
+            {
+              productid,
+              quantity: String(productQuantity)
+            }
+          ]
+        });
+
+        await existCart.save();
+
+        return res.status(201).json({
+          status: true,
+          data: existCart,
+          message: "Product added to cart successfully"
+        });
+      }
+
+      const existProduct = existCart.product.find(
+        (item) => item.productid.toString() === productid
+      );
+
+      if (existProduct) {
+        existProduct.quantity = String(
+          Number(existProduct.quantity) + productQuantity
+        );
+      } else {
+        existCart.product.push({
+          productid,
+          quantity: String(productQuantity)
+        });
+      }
+
+      await existCart.save();
+
+      return res.status(200).json({
+        status: true,
+        data: existCart,
+        message: "Product added to cart successfully"
+      });
+    }
+
+    if (type === "delete") {
+      if (!productid) {
+        return res.status(400).json({
+          status: false,
+          message: "Product ID is required"
+        });
+      }
+
+      const existCart = await Usercart.findOne({ userid });
+
+      if (!existCart) {
+        return res.status(404).json({
+          status: false,
+          message: "Cart not found"
+        });
+      }
+
+      existCart.product = existCart.product.filter(
+        (item) => item.productid.toString() !== productid
+      );
+
+      await existCart.save();
+
+      return res.status(200).json({
+        status: true,
+        data: existCart,
+        message: "Product removed from cart successfully"
+      });
+    }
+
+    return res.status(400).json({
+      status: false,
+      message: "Invalid cart type"
+    });
+
+  } catch (error) {
+    console.error('Failed to cart:', error);
+
+    return res.status(500).json({
+      status: false,
+      message: error.message
+    });
+  }
+};
+
+
+
+const Wishlist = async (req, res) => {
+  try {
+    const { type, userId, productId, email } = req.body.data || req.body;
+
+    console.log("req.body------------", req.body);
+
+    // GET: Retrieve all wishlist items using email only
+    if (type === "get") {
+
+      if (!email) {
+        return res.status(400).json({
+          status: false,
+          message: "Email is required"
+        });
+      }
+
+      const UserWishlist = await UserWishList.find({
+        email: email.trim().toLowerCase(),
+        status: 1
+      });
+
+      console.log("UserWishlist---------", UserWishlist);
+
+      return res.status(200).json({
+        status: true,
+        data: UserWishlist,
+        message: UserWishlist.length === 0
+          ? "Your wishlist is empty"
+          : "Your wishlist retrieved successfully"
+      });
+    }
+
+    // POST: Add product to wishlist
+    if (type === "post") {
+
+      if (!userId || !productId) {
+        return res.status(400).json({
+          status: false,
+          message: "User ID and Product ID are required"
+        });
+      }
+
+      const existingWishlist = await UserWishList.findOne({
+        userId: userId,
+        productId: productId,
+        status: 1
+      });
+
+      if (existingWishlist) {
+        return res.status(200).json({
+          status: false,
+          message: "Product already exists in your wishlist"
+        });
+      }
+
+      const inactiveWishlist = await UserWishList.findOne({
+        userId: userId,
+        productId: productId,
+        status: 0
+      });
+
+      if (inactiveWishlist) {
+
+        inactiveWishlist.status = 1;
+        await inactiveWishlist.save();
+
+        return res.status(200).json({
+          status: true,
+          data: inactiveWishlist,
+          message: "Product added to wishlist successfully"
+        });
+      }
+
+      const AddWishlist = await UserWishList.create({
+        userId: userId,
+        productId: productId,
+        status: 1
+      });
+
+      return res.status(201).json({
+        status: true,
+        data: AddWishlist,
+        message: "Product added to wishlist successfully"
+      });
+    }
+
+    // DELETE: Remove product from wishlist
+    if (type === "delete") {
+
+      if (!userId || !productId) {
+        return res.status(400).json({
+          status: false,
+          message: "User ID and Product ID are required"
+        });
+      }
+
+      const RemoveWishlist = await UserWishList.findOneAndUpdate(
+        {
+          userId: userId,
+          productId: productId,
+          status: 1
+        },
+        {
+          $set: {
+            status: 0
+          }
+        },
+        {
+          new: true
+        }
+      );
+
+      if (!RemoveWishlist) {
+        return res.status(404).json({
+          status: false,
+          message: "Product not found in wishlist"
+        });
+      }
+
+      return res.status(200).json({
+        status: true,
+        message: "Product removed from wishlist successfully"
+      });
+    }
+
+    return res.status(400).json({
+      status: false,
+      message: "Invalid wishlist type"
+    });
+
+  } catch (error) {
+    console.error("Failed to Wishlist:", error);
+
+    return res.status(500).json({
+      status: false,
+      message: error.message
+    });
+  }
+};
+
+
+
+
 module.exports = {
   userregister,
   userlogin,
@@ -2796,5 +3083,7 @@ module.exports = {
   siteAddress,
   addtositemap,
   edittimestamp,
-  deletesitemap
+  deletesitemap,
+  Wishlist,
+  cart
 };
