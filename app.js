@@ -147,7 +147,7 @@ app.use(session({
 
 // ================= ROUTES =================
 
-app.use('/', userRouter);
+app.use('/user', userRouter);
 app.use('/admin', adminRouter);
 
 // ================= 404 ERROR =================

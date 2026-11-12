@@ -11,8 +11,9 @@ const paymentController = require('../Controllers/payment.js');
 const optionalAuth = require('../Middleware/optionalAuth');
 const Product = require("../models/Product.js")
 const multer = require("multer");
-const  AiController = require("../Controllers/AiController.js");
-const aiAnalysisController =require("../Controllers/AIAnalysisController.js")
+const AiController = require("../Controllers/AiController.js");
+const AuthController = require("../Controllers/AuthController.js");
+const aiAnalysisController = require("../Controllers/AIAnalysisController.js")
 require('../config/environment');
 
 
@@ -105,8 +106,6 @@ router.delete('/api/ai/analyses', userauth, aiAnalysisController.removeAll);
 
 router.get('/', Userroute.homepage);
 router.get('/Userroute', Userroute.homepage);
-router.get('/login', (req, res) => res.json({ status: true }));
-router.get('/register', (req, res) => res.json({ status: true }));
 router.get('/blog', async (req, res, next) => {
   try { res.json({ status: true, blogs: await blogModule.find().sort({ createdAt: -1 }) }); }
   catch (error) { next(error); }
@@ -127,7 +126,6 @@ router.get('/offers', Userroute.offerPage);
 router.get('/products', Userroute.prodcutcategory);
 router.get('/profile', userauth, Userroute.getProfile);
 router.get('/my-orders', userauth, Userroute.getuserorders);
-router.get('/my-wishlist', userauth, Userroute.getWishlist);
 router.get('/my-address', userauth, Userroute.getAddresses);
 router.get('/cart', Userroute.viewcart);
 router.get('/shipping', async (req, res, next) => {
@@ -139,20 +137,18 @@ router.get('/haircare', (req, res) => Userroute.searchItem({ query: { q: 'hair' 
 
 
 
-router.post('/registration', Userroute.userregister)
-router.post('/Login', Userroute.userlogin)
-router.post('/verifyloginotp', Userroute.verifyloginotp)
-router.post('/resendloginotp', Userroute.resendloginotp)
-router.post('/forgotpassword', Userroute.forgotpassword)
-router.get('/passwordresetpage/:token', Userroute.passwordresetpage)
-router.post('/resetpassword/:id', Userroute.resetpassword)
+
+// router.get('/my-wishlist', userauth, Userroute.getWishlist);
+// router.post('/addWhislist', userauth, Userroute.addWhislist);
+// router.post('/removeFromWishlist', userauth, Userroute.removeFromWhislist);
+// router.get('/getWishlist', userauth, Userroute.getWishlist);
+
+
+
 router.post('/addinfluencer', Userroute.influencer);
-router.post('/addWhislist', userauth, Userroute.addWhislist);
 router.post("/addcart", userauth, Userroute.addcart);
-router.post('/removeFromWishlist', userauth, Userroute.removeFromWhislist);
 router.get('/search', Userroute.searchItem);
 router.get('/viewcart', Userroute.viewcart);
-
 router.post('/deletecart', userauth, Userroute.deletecart);
 router.get('/productcategory', Userroute.prodcutcategory);
 router.get('/subcategorydetails', Userroute.subcategorydetails);
@@ -164,7 +160,6 @@ router.get('/subcategorydata/:id', Userroute.subcategorydata);
 router.get('/products/:subCategoryId', Userroute.getProducts);
 router.post('/updateProfile', userauth, Userroute.updateProfile);
 router.get('/getProfile', userauth, Userroute.getProfile);
-router.get('/getWishlist', userauth, Userroute.getWishlist);
 router.post('/addAddress', userauth, Userroute.addAddress);
 router.put('/updateAddress/:id', userauth, Userroute.updateAddress);
 router.get('/skincaredetails', Userroute.skincaredetails);
@@ -174,7 +169,6 @@ router.delete('/deleteAddress/:id', userauth, Userroute.deleteAddress);
 router.get('/product/:category/:pagelink', Userroute.preview);
 router.post('/addquantity', userauth, Userroute.addquantity);
 router.get('/Category', Userroute.Category);
-
 router.post('/placeorder', userauth, Userroute.placeorder);
 router.get('/offerPage', Userroute.offerPage);
 router.get('/newOffer', Userroute.newOffer);
@@ -183,14 +177,11 @@ router.get('/bestSeller', Userroute.bestSeller);
 
 router.post('/order', userauth, paymentController.order);
 router.post('/verify-payment', userauth, paymentController.verify);
-
 router.get('/getuserorders', userauth, Userroute.getuserorders);
-
 router.post('/setOrderSession', (req, res) => {
   req.session.isOrderProcess = req.body.processOrder || false;
   res.json({ success: true });
 });
-
 router.post('/checkProductAvailability', Userroute.checkProductAvailability);
 router.post('/applyCoupon', Userroute.applycoupon);
 router.get('/influncerCouponCode', userauth, Userroute.influncerCouponCode);
@@ -207,14 +198,16 @@ router.post('/delete-sitemap', require('../Middleware/adminAuth'), Userroute.del
 
 
 
-router.post("/skinAnalyze", aiMediaUpload, AiController.SkinAnalyze
-);
-
-
-router.post("/makeupBaseAnalyze", aiMediaUpload, AiController.MakeupAnalyze
-);
-
-
+router.post("/login", AuthController.login);
+router.post("/register", AuthController.register);
+router.post("/verifyOTP", AuthController.verifyOTP);
+router.post("/resendOTP", AuthController.resendOTP);
+router.post("/forgot-password", AuthController.forgotPassword);
+router.post("/reset-password", AuthController.resetPassword);
+router.post("/skinAnalyze", aiMediaUpload, AiController.SkinAnalyze);
+router.post("/makeupBaseAnalyze", aiMediaUpload, AiController.MakeupAnalyze);
+router.post("/Wishlist", Userroute.Wishlist);
+router.post("/cart", Userroute.cart);
 
 
 
