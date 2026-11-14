@@ -2749,9 +2749,12 @@ const deletesitemap = async function (req, res) {
 
 const cart = async (req, res) => {
   try {
-    const { userid, productid, quantity, type } = req.body;
+    const { userid, productid, quantity, type } = req.body.data;
 
+  
     if (!userid) {
+
+      console.log('id not enough userid')
       return res.status(400).json({
         status: false,
         message: "User ID is required"
@@ -2892,9 +2895,8 @@ const Wishlist = async (req, res) => {
   try {
     const { type, userId, productId, email } = req.body.data || req.body;
 
-    console.log("req.body------------", req.body);
 
-    // GET: Retrieve all wishlist items using email only
+
     if (type === "get") {
 
       if (!email) {
@@ -2905,11 +2907,10 @@ const Wishlist = async (req, res) => {
       }
 
       const UserWishlist = await UserWishList.find({
-        email: email.trim().toLowerCase(),
+        userId,
         status: 1
       });
 
-      console.log("UserWishlist---------", UserWishlist);
 
       return res.status(200).json({
         status: true,
@@ -2920,7 +2921,8 @@ const Wishlist = async (req, res) => {
       });
     }
 
-    // POST: Add product to wishlist
+
+
     if (type === "post") {
 
       if (!userId || !productId) {
@@ -2931,50 +2933,35 @@ const Wishlist = async (req, res) => {
       }
 
       const existingWishlist = await UserWishList.findOne({
-        userId: userId,
-        productId: productId,
-        status: 1
+        userId,
+        productId
       });
 
       if (existingWishlist) {
-        return res.status(200).json({
-          status: false,
-          message: "Product already exists in your wishlist"
+        await UserWishList.deleteOne({
+          _id: existingWishlist._id
         });
-      }
-
-      const inactiveWishlist = await UserWishList.findOne({
-        userId: userId,
-        productId: productId,
-        status: 0
-      });
-
-      if (inactiveWishlist) {
-
-        inactiveWishlist.status = 1;
-        await inactiveWishlist.save();
 
         return res.status(200).json({
           status: true,
-          data: inactiveWishlist,
-          message: "Product added to wishlist successfully"
+          message: "Product removed from wishlist successfully"
         });
       }
 
-      const AddWishlist = await UserWishList.create({
-        userId: userId,
-        productId: productId,
+      const newWishlist = await UserWishList.create({
+        userId,
+        productId,
         status: 1
       });
 
       return res.status(201).json({
         status: true,
-        data: AddWishlist,
+        data: newWishlist,
         message: "Product added to wishlist successfully"
       });
     }
 
-    // DELETE: Remove product from wishlist
+
     if (type === "delete") {
 
       if (!userId || !productId) {
@@ -3027,6 +3014,11 @@ const Wishlist = async (req, res) => {
     });
   }
 };
+
+
+
+
+
 
 
 

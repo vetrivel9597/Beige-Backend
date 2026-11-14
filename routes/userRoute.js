@@ -211,4 +211,13 @@ router.post("/cart", Userroute.cart);
 
 
 
+
+router.post("/create-order", paymentController.createOrder);
+router.post("/verify-payments", paymentController.verifyPayment);
+router.post("/past-orders", paymentController.pastOrder);
+
+
+
+
+
 module.exports = router;
