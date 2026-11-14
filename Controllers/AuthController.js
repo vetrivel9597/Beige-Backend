@@ -11,18 +11,27 @@ const googleClient = new OAuth2Client(
 );
 const transporter = require("../config/transporter");
 const OTP = require("../models/Otp");
+const Token = require("../models/authToken");
 
-const generateToken = (user) => {
-    return jwt.sign(
+const generateToken = async (user) => {
+    const token = jwt.sign(
         {
-            id: user._id,
+            userId: user._id,
             email: user.email
         },
         process.env.JWT_SECRET,
         {
-            expiresIn: "7d"
+            expiresIn: "24h"
         }
     );
+
+    await Token.findOneAndUpdate(
+        { token },
+        { token, userId: user._id },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    return token;
 };
 
 
@@ -211,23 +220,26 @@ exports.verifyOTP = async (req, res) => {
                 });
             }
 
-            const salt = crypto.randomBytes(16).toString("hex");
+
+
+            console.log(' process.env.PASSWORD_SECRET', process.env.PASSWORD_SECRET)
 
             const hashedPassword = CryptoJS.SHA256(
-                password + salt
+                password + process.env.PASSWORD_SECRET
             ).toString();
+
 
             const user = await User.create({
                 username: name.trim(),
                 email: normalizedEmail,
-                password: `${salt}:${hashedPassword}`
+                password: hashedPassword
             });
 
             await OTP.deleteOne({
                 _id: otpRecord._id
             });
 
-            const token = generateToken(user);
+            const token = await generateToken(user);
 
             return res.status(201).json({
                 success: true,
@@ -244,7 +256,7 @@ exports.verifyOTP = async (req, res) => {
 
         if (type === "login") {
 
-            console.log('enter login rtype login')
+            console.log('enter login type ')
 
             const otpRecord = await OTP.findOne({
                 email: normalizedEmail
@@ -291,7 +303,7 @@ exports.verifyOTP = async (req, res) => {
                 _id: otpRecord._id
             });
 
-            const token = generateToken(user);
+            const token = await generateToken(user);
 
             return res.status(200).json({
                 success: true,
@@ -300,8 +312,10 @@ exports.verifyOTP = async (req, res) => {
                 user: {
                     id: user._id,
                     name: user.username,
-                    email: user.email
-                }
+                    email: user.email,
+                    address: user.other_address?.[0]?.address || ""
+                },
+
             });
         }
 
@@ -389,18 +403,20 @@ exports.resendOTP = async (req, res) => {
 
 
 
+
 exports.login = async (req, res) => {
     try {
-
         const { email, password } = req.body?.data || req.body || {};
-
-        console.log("req.body", req.body);
 
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
                 message: "Email and password are required"
             });
+        }
+
+        if (!process.env.PASSWORD_SECRET) {
+            throw new Error("PASSWORD_SECRET is missing");
         }
 
         const normalizedEmail = email.trim().toLowerCase();
@@ -416,23 +432,11 @@ exports.login = async (req, res) => {
             });
         }
 
-        // CryptoJS password verification
-        const [salt, storedHash] = user.password.split(":");
-
-        if (!salt || !storedHash) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password"
-            });
-        }
-
         const hashedPassword = CryptoJS.SHA256(
-            password + salt
+            password + process.env.PASSWORD_SECRET
         ).toString();
 
-        const isMatch = hashedPassword === storedHash;
-
-        console.log("isMatch", isMatch);
+        const isMatch = hashedPassword === user.password;
 
         if (!isMatch) {
             return res.status(401).json({
@@ -446,7 +450,6 @@ exports.login = async (req, res) => {
             .randomInt(100000, 1000000)
             .toString();
 
-        // Save OTP
         await OTP.findOneAndUpdate(
             { email: normalizedEmail },
             {
@@ -494,6 +497,7 @@ exports.login = async (req, res) => {
         });
     }
 };
+
 
 
 
@@ -556,7 +560,7 @@ exports.googleLogin = async (req, res) => {
             await user.save();
         }
 
-        const token = generateToken(user);
+        const token = await generateToken(user);
 
         return res.status(200).json({
             success: true,

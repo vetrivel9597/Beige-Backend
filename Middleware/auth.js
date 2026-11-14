@@ -24,14 +24,16 @@ async function verifyToken(req, res, next) {
   } catch {
     return res.status(401).json({ status: false, message: 'Your login session has expired. Please sign in again.' });
   }
-  if (!decoded?.userId) {
+
+  const userId = decoded?.userId || decoded?.id;
+  if (!userId) {
     return res.status(401).json({ status: false, message: 'Your login session is invalid. Please sign in again.' });
   }
 
   try {
     const [storedToken, user] = await Promise.all([
       Token.findOne({ token: bearerToken }).select('_id'),
-      User.findById(decoded.userId).select('_id'),
+      User.findById(userId).select('_id'),
     ]);
     if (!storedToken || !user) {
       return res.status(401).json({ status: false, message: 'Your login session has expired. Please sign in again.' });

@@ -12,10 +12,11 @@ module.exports = async function optionalAuth(req, res, next) {
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded?.userId) return res.status(401).json({ status: false, message: 'Your login session is invalid. Please sign in again.' });
+    const userId = decoded?.userId || decoded?.id;
+    if (!userId) return res.status(401).json({ status: false, message: 'Your login session is invalid. Please sign in again.' });
     const [storedToken, user] = await Promise.all([
       Token.findOne({ token }).select('_id'),
-      User.findById(decoded.userId).select('_id'),
+      User.findById(userId).select('_id'),
     ]);
     if (!storedToken || !user) return res.status(401).json({ status: false, message: 'Your login session has expired. Please sign in again.' });
     req.authUserId = user._id;
