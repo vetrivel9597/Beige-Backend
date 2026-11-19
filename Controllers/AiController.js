@@ -1,17 +1,84 @@
 require("../config/environment");
 
-const Groq = require("groq-sdk");
 const multer = require("multer");
 const sharp = require("sharp");
 const Product = require("../models/Product");
 const AIAnalysis = require("../models/AIAnalysis");
-const { getVisionImages, isImageFile, isVideoFile } = require("../utils/aiMedia");
+const {
+  getVisionImages,
+  isImageFile,
+  isVideoFile,
+} = require("../utils/aiMedia");
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+
+const OLLAMA_URL = "http://localhost:11434/api/chat";
+const OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate";
+const AI_MODEL = "qwen3-vl:2b-instruct";
+const OLLAMA_TIMEOUT_MS = 300000;
 
 
+
+
+const callOllama = async ({ system, prompt, images, temperature, maxTokens }) => {
+  const response = await fetch(OLLAMA_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
+    body: JSON.stringify({
+      model: AI_MODEL,
+      stream: false,
+      ...(AI_MODEL.includes("instruct") ? {} : { think: false }),
+      format: "json",
+      keep_alive: "30m",
+      options: {
+        temperature,
+        num_ctx: 4096,
+        num_predict: maxTokens,
+      },
+      messages: [
+        { role: "system", content: system },
+        {
+          role: "user",
+          content: prompt,
+          images: images.map((buffer) => buffer.toString("base64")),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = new Error(
+      `Ollama error ${response.status}: ${await response.text()}`
+    );
+    err.status = response.status;
+    throw err;
+  }
+
+  const data = await response.json();
+
+
+  if (data.done_reason === "length") {
+    console.warn("OLLAMA: output was truncated by num_predict limit");
+  }
+
+  return data.message?.content;
+};
+
+fetch(OLLAMA_GENERATE_URL, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ model: AI_MODEL, keep_alive: "30m" }),
+}).catch(() => { });
+
+let ollamaBusy = Promise.resolve();
+const runExclusive = (fn) => {
+  const run = ollamaBusy.then(fn, fn);
+  ollamaBusy = run.catch(() => { });
+  return run;
+};
+
+const isTimeoutError = (error) =>
+  error?.name === "TimeoutError" || error?.name === "AbortError";
 
 const getProductText = (product) => {
   return [
@@ -24,7 +91,6 @@ const getProductText = (product) => {
     .join(" ")
     .toLowerCase();
 };
-
 
 const getRecommendedProducts = (
   aiProducts,
@@ -60,7 +126,6 @@ const getRecommendedProducts = (
       }
     }
   }
-
 
   if (selected.size < 3) {
     const skinText = [
@@ -177,8 +242,10 @@ const getRecommendedProducts = (
         if (isHairRelevant && isHairProduct) {
           score += 2;
 
-          if (hairText.includes("chemically treated") ||
-            hairText.includes("chemically")) {
+          if (
+            hairText.includes("chemically treated") ||
+            hairText.includes("chemically")
+          ) {
             if (
               text.includes("repair") ||
               text.includes("damage") ||
@@ -187,14 +254,13 @@ const getRecommendedProducts = (
               text.includes("hair mask")
             ) {
               score += 2;
-              // ✅ FIX: don't overwrite a stronger skin-based reason
+
               if (!reason) {
                 reason =
                   "Selected as a haircare option for your chemically treated hair.";
               }
-            }
+            } 
           } else if (!reason) {
-            // ✅ FIX: don't overwrite a stronger skin-based reason
             reason =
               "Selected as a haircare option based on your hair questionnaire.";
           }
@@ -223,7 +289,6 @@ const getRecommendedProducts = (
     }
   }
 
-
   return Array.from(selected.values()).map(
     ({ product, reason, usage, priority }) => ({
       _id: String(product._id),
@@ -242,12 +307,8 @@ const getRecommendedProducts = (
   );
 };
 
-
-
 const SkinAnalyze = async (req, res) => {
   try {
-
-
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -307,7 +368,6 @@ const SkinAnalyze = async (req, res) => {
       });
     }
 
-
     const products = await Product.find({
       productStatus: 1,
       quantity: { $gt: 0 },
@@ -336,10 +396,7 @@ const SkinAnalyze = async (req, res) => {
 
     const visionImages = await getVisionImages(req.file);
 
-    const selectedImages = visionImages.slice(
-      0,
-      isVideoFile(req.file) ? 2 : 1
-    );
+    const selectedImages = visionImages.slice(0, 1);
 
     if (!selectedImages.length) {
       return res.status(400).json({
@@ -353,13 +410,13 @@ const SkinAnalyze = async (req, res) => {
         const optimizedBuffer = await sharp(buffer)
           .rotate()
           .resize({
-            width: 512,
-            height: 512,
+            width: 256,
+            height: 256,
             fit: "inside",
             withoutEnlargement: true,
           })
           .jpeg({
-            quality: 65,
+            quality: 60,
           })
           .toBuffer();
 
@@ -417,6 +474,9 @@ ROUTINE:
 - Maximum 2 night steps.
 - Maximum 2 haircare steps.
 - Maximum 2 general advice points.
+- Each routine step and advice point must be ONE short plain-text
+  sentence (a string, never an object).
+- Keep every "reason" and "usage" under 15 words.
 - Keep descriptions short.
 
 Return valid JSON only in this structure:
@@ -459,46 +519,32 @@ Return valid JSON only in this structure:
 }
 `;
 
-    const completion = await groq.chat.completions.create({
-      model: "qwen/qwen3.8-27b",
-      temperature: 0.1,
+    console.log("SKIN AI: Starting Ollama request");
+    console.log("SKIN AI: Products fetched:", products.length);
+    console.log("SKIN AI: Images optimized:", optimizedImages.length);
 
-      max_completion_tokens: 900,
+    const aiStartTime = Date.now();
 
-      response_format: {
-        type: "json_object",
-      },
 
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a careful cosmetic skincare and haircare assistant. Return valid JSON only. Never invent products or IDs. Keep responses concise.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: prompt,
-            },
-            ...optimizedImages.map(({ buffer, mimeType }) => ({
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${buffer.toString("base64")}`,
-              },
-            })),
-          ],
-        },
-      ],
-    });
+    const aiContent = await runExclusive(() =>
+      callOllama({
+        system:
+          "You are a careful cosmetic skincare and haircare assistant. Return valid JSON only. Never invent products or IDs. Keep responses concise.",
+        prompt,
+        images: optimizedImages.map(({ buffer }) => buffer),
+        temperature: 0.1,
+        maxTokens: 1000,
+      })
+    );
 
-    const choice = completion.choices?.[0];
-
-    const aiContent = choice?.message?.content;
+    console.log(
+      "SKIN AI: Ollama response received in",
+      ((Date.now() - aiStartTime) / 1000).toFixed(2),
+      "seconds"
+    );
 
     if (!aiContent) {
-      throw new Error("Groq returned an empty response.");
+      throw new Error("Ollama returned an empty response.");
     }
 
     let aiResult;
@@ -506,8 +552,8 @@ Return valid JSON only in this structure:
     try {
       aiResult = JSON.parse(aiContent);
     } catch (error) {
-      console.error("Invalid Groq JSON:", aiContent);
-      throw new Error("Groq returned invalid JSON.");
+      console.error("Invalid Ollama JSON:", aiContent);
+      throw new Error("Ollama returned invalid JSON.");
     }
 
     const skinAnalysis = aiResult.skinAnalysis || {};
@@ -543,7 +589,6 @@ Return valid JSON only in this structure:
           "This is an AI-generated cosmetic assessment, not a medical diagnosis.",
       },
     });
-
   } catch (error) {
     console.error("Skin analysis error:", error);
 
@@ -557,28 +602,10 @@ Return valid JSON only in this structure:
       });
     }
 
-    if (error.status === 429) {
-      const groqErrorMessage =
-        error.error?.error?.message || error.message || "";
-
-      const retryAfter = Number(
-        error.headers?.get?.("retry-after") || 0
-      );
-
-      const isDailyLimit =
-        groqErrorMessage.toLowerCase().includes("tokens per day") ||
-        groqErrorMessage.toLowerCase().includes("token limit");
-
-      return res.status(429).json({
+    if (isTimeoutError(error)) {
+      return res.status(504).json({
         success: false,
-        message: isDailyLimit
-          ? "Daily AI token limit reached. Please try again after the quota resets."
-          : "AI rate limit reached. Please try again later.",
-        retryAfterSeconds: retryAfter,
-        retryAfterMinutes: Math.ceil(retryAfter / 60),
-        limitType: isDailyLimit
-          ? "daily_token_limit"
-          : "rate_limit",
+        message: "The AI is taking too long to respond. Please try again.",
       });
     }
 
@@ -600,8 +627,6 @@ Return valid JSON only in this structure:
   }
 };
 
-
-
 const MakeupAnalyze = async (req, res) => {
   try {
     const { lipColor, foundationShade } = req.body;
@@ -614,11 +639,17 @@ const MakeupAnalyze = async (req, res) => {
     }
 
     if (!isImageFile(req.file) && !isVideoFile(req.file)) {
-      return res.status(400).json({ success: false, message: "Please upload a supported image or video." });
+      return res.status(400).json({
+        success: false,
+        message: "Please upload a supported image or video.",
+      });
     }
 
     if (!isVideoFile(req.file) && req.file.size > 10 * 1024 * 1024) {
-      return res.status(400).json({ success: false, message: "Image size must be 10 MB or less." });
+      return res.status(400).json({
+        success: false,
+        message: "Image size must be 10 MB or less.",
+      });
     }
 
     if (!lipColor || !foundationShade) {
@@ -629,13 +660,21 @@ const MakeupAnalyze = async (req, res) => {
     }
 
     const visionImages = await getVisionImages(req.file);
-    const optimizedImages = await Promise.all(visionImages.map(async ({ buffer }) =>
-      sharp(buffer)
-        .rotate()
-        .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer()
-    ));
+
+
+    const optimizedImages = await Promise.all(
+      visionImages.slice(0, 1).map(async ({ buffer }) =>
+        sharp(buffer)
+          .rotate()
+          .resize(320, 320, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .jpeg({ quality: 70 })
+          .toBuffer()
+      )
+    );
+
     const mediaDescription = isVideoFile(req.file)
       ? "Analyze the uploaded video using the provided sampled frames, taken from its first 12 seconds."
       : "Analyze the uploaded face image.";
@@ -759,46 +798,36 @@ Return ONLY valid JSON in this structure:
 
 Keep recommendations concise, specific and useful.
 Never claim laboratory-level shade matching from a photograph.
+Keep every value under 12 words as a short plain-text string.
+Do not repeat information between fields.
+Limit "completeRoutine" to a maximum of 5 steps.
 `;
 
-    const completion = await groq.chat.completions.create({
-      model: "qwen/qwen3.8-27b",
+    console.log("MAKEUP AI: Starting Ollama request");
+    console.log("MAKEUP AI: Images optimized:", optimizedImages.length);
 
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an expert professional makeup artist and cosmetic shade consultant. Analyze images carefully and return accurate, honest JSON recommendations.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: prompt,
-            },
-            ...optimizedImages.map((buffer) => ({
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${buffer.toString("base64")}`,
-              },
-            })),
-          ],
-        },
-      ],
+    const aiStartTime = Date.now();
 
-      temperature: 0.2,
-      max_completion_tokens: 800,
-      response_format: {
-        type: "json_object",
-      },
-    });
 
-    const aiResponse =
-      completion.choices[0]?.message?.content;
+    const aiResponse = await runExclusive(() =>
+      callOllama({
+        system:
+          "You are an expert professional makeup artist and cosmetic shade consultant. Analyze images carefully and return accurate, honest JSON recommendations.",
+        prompt,
+        images: optimizedImages,
+        temperature: 0.2,
+        maxTokens: 1800,
+      })
+    );
+
+    console.log(
+      "MAKEUP AI: Ollama response received in",
+      ((Date.now() - aiStartTime) / 1000).toFixed(2),
+      "seconds"
+    );
 
     if (!aiResponse) {
-      throw new Error("Empty response received from Groq AI.");
+      throw new Error("Empty response received from Ollama.");
     }
 
     const analysis = JSON.parse(aiResponse);
@@ -812,12 +841,32 @@ Never claim laboratory-level shade matching from a photograph.
       },
       data: analysis,
     });
-
   } catch (error) {
     console.error("Makeup AI Analysis Error:", error);
 
+    if (error instanceof multer.MulterError) {
+      return res.status(400).json({
+        success: false,
+        message:
+          error.code === "LIMIT_FILE_SIZE"
+            ? "Image size must be 10 MB or video size must be 50 MB or less."
+            : error.message,
+      });
+    }
+
+
+    if (isTimeoutError(error)) {
+      return res.status(504).json({
+        success: false,
+        message: "The AI is taking too long to respond. Please try again.",
+      });
+    }
+
     if (error.status === 400) {
-      return res.status(400).json({ success: false, message: error.message });
+      return res.status(400).json({
+        success: false,
+        message: error.message || "Invalid AI request.",
+      });
     }
 
     return res.status(500).json({
@@ -833,5 +882,5 @@ Never claim laboratory-level shade matching from a photograph.
 
 module.exports = {
   SkinAnalyze,
-  MakeupAnalyze
+  MakeupAnalyze,
 };

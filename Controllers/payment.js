@@ -19,6 +19,8 @@ const cloudinary = require('cloudinary').v2;
 const { createCanvas } = require('canvas');
 const JsBarcode = require('jsbarcode');
 const { default: mongoose } = require('mongoose');
+const Delivery = require("../models/Delivery")
+
 
 
 const razorpay = new Razorpay({
@@ -27,11 +29,33 @@ const razorpay = new Razorpay({
 });
 
 
+const deliveryStatuses = [
+	"Ordered",
+	"Confirmed",
+	"Processing",
+	"Shipped",
+	"Out for Delivery",
+	"Delivered",
+	"Cancelled"
+];
+
+const statusTransitions = {
+	Ordered: ["Confirmed", "Cancelled"],
+	Confirmed: ["Processing", "Cancelled"],
+	Processing: ["Shipped", "Cancelled"],
+	Shipped: ["Out for Delivery", "Cancelled"],
+	"Out for Delivery": ["Delivered", "Cancelled"],
+	Delivered: [],
+	Cancelled: []
+};
+
+
 
 let razorPayInstance = new Razorpay({
 	key_id: process.env.RAZORPAY_KEY_ID,
 	key_secret: process.env.RAZORPAY_KEY_SECRET
 })
+
 
 async function generatePdf(htmlContent) {
 	let options = { format: 'A4' };
@@ -46,6 +70,51 @@ async function generatePdf(htmlContent) {
 		});
 	});
 }
+
+async function sendInvoiceEmail(recipientEmail, invoiceData) {
+
+	const invoiceTemplateSource = fs.readFileSync(path.join(__dirname, '../EmailTemplates/invoice_template.html'), 'utf8');
+	const invoiceTemplate = handleBars.compile(invoiceTemplateSource);
+	const html = invoiceTemplate(invoiceData);
+
+	const pdfBuffer = await generatePdf(html);
+	const pdfPath = path.join(__dirname, `../public/Assets/invoices/${invoiceData.orderId}.pdf`);
+	fs.writeFileSync(pdfPath, pdfBuffer);
+
+
+	const transporter = nodemailer.createTransport({
+		host: process.env.SMTP_HOST,
+		port: Number(process.env.SMTP_INVOICE_PORT),
+		secure: process.env.SMTP_INVOICE_SECURE === 'true',
+		auth: {
+			user: process.env.SMTP_USER,
+			pass: process.env.SMTP_PASSWORD
+		},
+	});
+
+	let mailOptions = {
+		from: process.env.SMTP_FROM,
+		to: recipientEmail,
+		subject: "Invoice",
+		text: 'Thank you for your purchase! If you have any questions, please feel free to contact us',
+		attachments: [
+			{
+				filename: `${invoiceData.orderId}.pdf`,
+				path: pdfPath // Attach the stored PDF file
+			}
+		]
+	};
+
+	// console.log("mailOptions---", mailOptions);
+
+	try {
+		let info = await transporter.sendMail(mailOptions);
+		console.log('Email sent:', info.response);
+	} catch (error) {
+		console.error('Error sending email:', error);
+	}
+}
+
 
 exports.order = async (req, res) => {
 	const userID = res.locals.user_id;
@@ -153,51 +222,6 @@ exports.order = async (req, res) => {
 		res.status(500).json({ success: false, message: "Something went wrong", });
 	}
 }
-
-async function sendInvoiceEmail(recipientEmail, invoiceData) {
-
-	const invoiceTemplateSource = fs.readFileSync(path.join(__dirname, '../EmailTemplates/invoice_template.html'), 'utf8');
-	const invoiceTemplate = handleBars.compile(invoiceTemplateSource);
-	const html = invoiceTemplate(invoiceData);
-
-	const pdfBuffer = await generatePdf(html);
-	const pdfPath = path.join(__dirname, `../public/Assets/invoices/${invoiceData.orderId}.pdf`);
-	fs.writeFileSync(pdfPath, pdfBuffer);
-
-
-	const transporter = nodemailer.createTransport({
-		host: process.env.SMTP_HOST,
-		port: Number(process.env.SMTP_INVOICE_PORT),
-		secure: process.env.SMTP_INVOICE_SECURE === 'true',
-		auth: {
-			user: process.env.SMTP_USER,
-			pass: process.env.SMTP_PASSWORD
-		},
-	});
-
-	let mailOptions = {
-		from: process.env.SMTP_FROM,
-		to: recipientEmail,
-		subject: "Invoice",
-		text: 'Thank you for your purchase! If you have any questions, please feel free to contact us',
-		attachments: [
-			{
-				filename: `${invoiceData.orderId}.pdf`,
-				path: pdfPath // Attach the stored PDF file
-			}
-		]
-	};
-
-	// console.log("mailOptions---", mailOptions);
-
-	try {
-		let info = await transporter.sendMail(mailOptions);
-		console.log('Email sent:', info.response);
-	} catch (error) {
-		console.error('Error sending email:', error);
-	}
-}
-
 
 exports.verify = async (req, res) => {
 	const userID = res.locals.user_id;
@@ -380,7 +404,7 @@ exports.createOrder = async (req, res) => {
 	try {
 		const { amount, userId } = req.body.data;
 
-		
+
 		if (!amount || Number(amount) <= 0) {
 			return res.status(400).json({
 				success: false,
@@ -645,6 +669,403 @@ exports.pastOrder = async (req, res) => {
 		return res.status(500).json({
 			success: false,
 			message: "Unable to fetch past orders"
+		});
+	}
+};
+
+
+
+
+
+
+
+exports.createDelivery = async (req, res) => {
+	try {
+		const { orderId } = req.body;
+
+		if (!orderId) {
+			return res.status(400).json({
+				success: false,
+				message: "Order ID is required"
+			});
+		}
+
+		const order = await Orders.findOne({ orderId });
+
+		if (!order) {
+			return res.status(404).json({
+				success: false,
+				message: "Order not found"
+			});
+		}
+
+		const existingDelivery = await Delivery.findOne({ orderId });
+
+		if (existingDelivery) {
+			return res.status(409).json({
+				success: false,
+				message: "Delivery record already exists"
+			});
+		}
+
+		const delivery = await Delivery.create({
+			orderId: order.orderId,
+			userid: order.userid,
+			deliveryStatus: "Ordered",
+			statusHistory: [{
+				deliveryStatus: "Ordered",
+				message: "Your order has been placed successfully"
+			}]
+		});
+
+		return res.status(201).json({
+			success: true,
+			message: "Delivery created successfully",
+			data: delivery
+		});
+
+	} catch (error) {
+		console.log("Create Delivery Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.getAllDeliveries = async (req, res) => {
+	try {
+		const {
+			page = 1,
+			limit = 10,
+			deliveryStatus,
+			search
+		} = req.query;
+
+		const filter = {};
+
+		if (deliveryStatus) {
+			if (!deliveryStatuses.includes(deliveryStatus)) {
+				return res.status(400).json({
+					success: false,
+					message: "Invalid delivery status"
+				});
+			}
+
+			filter.deliveryStatus = deliveryStatus;
+		}
+
+		if (search) {
+			filter.$or = [
+				{ orderId: { $regex: search, $options: "i" } },
+				{ trackingNumber: { $regex: search, $options: "i" } },
+				{ courierName: { $regex: search, $options: "i" } }
+			];
+		}
+
+		const skip = (Number(page) - 1) * Number(limit);
+
+		const [deliveries, total] = await Promise.all([
+			Delivery.find(filter)
+				.sort({ createdAt: -1 })
+				.skip(skip)
+				.limit(Number(limit))
+				.lean(),
+
+			Delivery.countDocuments(filter)
+		]);
+
+		return res.status(200).json({
+			success: true,
+			message: "Deliveries fetched successfully",
+			data: deliveries,
+			pagination: {
+				total,
+				page: Number(page),
+				limit: Number(limit),
+				totalPages: Math.ceil(total / Number(limit))
+			}
+		});
+
+	} catch (error) {
+		console.log("Get Deliveries Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.getDeliveryByOrderId = async (req, res) => {
+	try {
+		const { orderId } = req.params;
+
+		const delivery = await Delivery.findOne({ orderId }).lean();
+
+		if (!delivery) {
+			return res.status(404).json({
+				success: false,
+				message: "Delivery details not found"
+			});
+		}
+
+		return res.status(200).json({
+			success: true,
+			message: "Delivery details fetched successfully",
+			data: delivery
+		});
+
+	} catch (error) {
+		console.log("Get Delivery Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.getUserDeliveries = async (req, res) => {
+	try {
+		const { userid } = req.params;
+
+		if (!mongoose.Types.ObjectId.isValid(userid)) {
+			return res.status(400).json({
+				success: false,
+				message: "Invalid User ID"
+			});
+		}
+
+		const deliveries = await Delivery.find({ userid })
+			.sort({ createdAt: -1 })
+			.lean();
+
+		return res.status(200).json({
+			success: true,
+			message: "User deliveries fetched successfully",
+			data: deliveries
+		});
+
+	} catch (error) {
+		console.log("Get User Deliveries Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.updateDeliveryStatus = async (req, res) => {
+	try {
+		const { orderId } = req.params;
+
+		const {
+			deliveryStatus,
+			message
+		} = req.body;
+
+		if (!deliveryStatus || !deliveryStatuses.includes(deliveryStatus)) {
+			return res.status(400).json({
+				success: false,
+				message: "Valid delivery status is required"
+			});
+		}
+
+		const delivery = await Delivery.findOne({ orderId });
+
+		if (!delivery) {
+			return res.status(404).json({
+				success: false,
+				message: "Delivery record not found"
+			});
+		}
+
+		const allowedNextStatuses =
+			statusTransitions[delivery.deliveryStatus] || [];
+
+		if (!allowedNextStatuses.includes(deliveryStatus)) {
+			return res.status(400).json({
+				success: false,
+				message: `Cannot change status from ${delivery.deliveryStatus} to ${deliveryStatus}`
+			});
+		}
+
+		delivery.deliveryStatus = deliveryStatus;
+
+		if (deliveryStatus === "Shipped") {
+			delivery.shippedDate = new Date();
+		}
+
+		if (deliveryStatus === "Delivered") {
+			delivery.deliveryDate = new Date();
+		}
+
+		delivery.statusHistory.push({
+			deliveryStatus,
+			message: message || `Order ${deliveryStatus}`,
+			updatedBy: req.adminId || null
+		});
+
+		await delivery.save();
+
+		return res.status(200).json({
+			success: true,
+			message: "Delivery status updated successfully",
+			data: delivery
+		});
+
+	} catch (error) {
+		console.log("Update Delivery Status Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.updateTrackingDetails = async (req, res) => {
+	try {
+		const { orderId } = req.params;
+
+		const {
+			trackingNumber,
+			courierName,
+			estimatedDeliveryDate,
+			deliveryRemarks
+		} = req.body;
+
+		const delivery = await Delivery.findOne({ orderId });
+
+		if (!delivery) {
+			return res.status(404).json({
+				success: false,
+				message: "Delivery record not found"
+			});
+		}
+
+		if (["Delivered", "Cancelled"].includes(delivery.deliveryStatus)) {
+			return res.status(400).json({
+				success: false,
+				message: "Cannot update tracking for a completed or cancelled delivery"
+			});
+		}
+
+		if (trackingNumber !== undefined) {
+			delivery.trackingNumber = trackingNumber;
+		}
+
+		if (courierName !== undefined) {
+			delivery.courierName = courierName;
+		}
+
+		if (estimatedDeliveryDate !== undefined) {
+			const date = new Date(estimatedDeliveryDate);
+
+			if (Number.isNaN(date.getTime())) {
+				return res.status(400).json({
+					success: false,
+					message: "Invalid estimated delivery date"
+				});
+			}
+
+			delivery.estimatedDeliveryDate = date;
+		}
+
+		if (deliveryRemarks !== undefined) {
+			delivery.deliveryRemarks = deliveryRemarks;
+		}
+
+		await delivery.save();
+
+		return res.status(200).json({
+			success: true,
+			message: "Tracking details updated successfully",
+			data: delivery
+		});
+
+	} catch (error) {
+		console.log("Update Tracking Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.getDeliveryHistory = async (req, res) => {
+	try {
+		const { orderId } = req.params;
+
+		const delivery = await Delivery.findOne({ orderId })
+			.select("orderId deliveryStatus statusHistory")
+			.lean();
+
+		if (!delivery) {
+			return res.status(404).json({
+				success: false,
+				message: "Delivery record not found"
+			});
+		}
+
+		return res.status(200).json({
+			success: true,
+			message: "Delivery history fetched successfully",
+			data: delivery
+		});
+
+	} catch (error) {
+		console.log("Delivery History Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
+		});
+	}
+};
+
+
+
+exports.deleteDelivery = async (req, res) => {
+	try {
+		const { orderId } = req.params;
+
+		const delivery = await Delivery.findOneAndDelete({ orderId });
+
+		if (!delivery) {
+			return res.status(404).json({
+				success: false,
+				message: "Delivery record not found"
+			});
+		}
+
+		return res.status(200).json({
+			success: true,
+			message: "Delivery record deleted successfully"
+		});
+
+	} catch (error) {
+		console.log("Delete Delivery Error:", error);
+
+		return res.status(500).json({
+			success: false,
+			message: error.message
 		});
 	}
 };

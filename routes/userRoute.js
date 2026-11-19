@@ -217,6 +217,15 @@ router.post("/verify-payments", paymentController.verifyPayment);
 router.post("/past-orders", paymentController.pastOrder);
 
 
+router.get("/delivery-history/:orderId", paymentController.getDeliveryHistory);
+router.get("/all-deliveries", paymentController.getAllDeliveries);
+router.get("/delivery/:orderId", paymentController.getDeliveryByOrderId);
+router.get("/user-deliveries/:userid", paymentController.getUserDeliveries);
+router.post("/update-delivery/:orderId", paymentController.updateDeliveryStatus);
+router.post("/update-tracking/:orderId", paymentController.updateTrackingDetails);
+router.post("/create-delivery", paymentController.createDelivery);
+router.delete("/delete-delivery/:orderId", paymentController.deleteDelivery);
+
 
 
 

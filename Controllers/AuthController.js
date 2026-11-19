@@ -676,14 +676,7 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        if (typeof password !== "string") {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid password"
-            });
-        }
-
-        if (password.length < 8) {
+        if (typeof password !== "string" || password.length < 8) {
             return res.status(400).json({
                 success: false,
                 message: "Password must contain at least 8 characters"
@@ -722,35 +715,22 @@ exports.resetPassword = async (req, res) => {
             throw new Error("JWT_SECRET is not configured");
         }
 
-        // Verify JWT reset token
         let decoded;
 
         try {
-            decoded = jwt.verify(
-                token,
-                process.env.JWT_SECRET,
-                {
-                    algorithms: ["HS256"]
-                }
-            );
+            decoded = jwt.verify(token, process.env.JWT_SECRET, {
+                algorithms: ["HS256"]
+            });
         } catch (error) {
-            if (error.name === "TokenExpiredError") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Reset link expired. Please request a new link."
-                });
-            }
-
             return res.status(400).json({
                 success: false,
-                message: "Invalid or expired reset link"
+                message: error.name === "TokenExpiredError"
+                    ? "Reset link expired. Please request a new link."
+                    : "Invalid or expired reset link"
             });
         }
 
-        if (
-            decoded.type !== "reset-password" ||
-            !decoded.email
-        ) {
+        if (decoded.type !== "reset-password" || !decoded.email) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid reset token"
@@ -759,7 +739,7 @@ exports.resetPassword = async (req, res) => {
 
         const user = await User.findOne({
             email: decoded.email
-        });
+        }).select("_id email");
 
         if (!user) {
             return res.status(404).json({
@@ -768,16 +748,37 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        // Existing CryptoJS password hashing logic
-        const salt = crypto.randomBytes(16).toString("hex");
-
         const hashedPassword = CryptoJS.SHA256(
-            password + salt
+            password + process.env.PASSWORD_SECRET
         ).toString();
 
-        user.password = `${salt}:${hashedPassword}`;
 
-        await user.save();
+        const updatedUser = await User.findOneAndUpdate(
+            {
+                email: decoded.email
+            },
+            {
+                $set: {
+                    password: hashedPassword
+                }
+            },
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
+        console.log('updatedUser', updatedUser)
+
+
+
+
+        if (!updatedUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found or already deleted"
+            });
+        }
 
         return res.status(200).json({
             success: true,
@@ -793,4 +794,5 @@ exports.resetPassword = async (req, res) => {
         });
     }
 };
+
 
