@@ -428,6 +428,16 @@ exports.createOrder = async (req, res) => {
 		const razorpayOrder = await razorpay.orders.create(options);
 
 
+
+		const existingDelivery = await Delivery.findOne({ orderId: razorpayOrder.id });
+
+		if (existingDelivery) {
+			return res.status(409).json({
+				success: false,
+				message: "Delivery record already exists"
+			});
+		}
+
 		const invoiceId = `INV_${Date.now()}`;
 
 		const paymentDetails = new PaymentDetail({
@@ -590,6 +600,22 @@ exports.verifyPayment = async (req, res) => {
 
 		await newOrder.save();
 
+
+
+
+		const delivery = await Delivery.create({
+			orderId: razorpay_order_id,
+			userid: existingPayment.userId,
+			deliveryStatus: "Ordered",
+			statusHistory: [{
+				deliveryStatus: "Ordered",
+				message: "Your order has been placed successfully"
+			}]
+		});
+
+		await delivery.save();
+
+
 		existingPayment.paymentId = razorpay_payment_id;
 
 		existingPayment.signature = razorpay_signature;
@@ -679,6 +705,19 @@ exports.pastOrder = async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 exports.createDelivery = async (req, res) => {
 	try {
 		const { orderId } = req.body;
@@ -738,12 +777,15 @@ exports.createDelivery = async (req, res) => {
 
 exports.getAllDeliveries = async (req, res) => {
 	try {
+
 		const {
 			page = 1,
 			limit = 10,
 			deliveryStatus,
 			search
 		} = req.query;
+
+		console.log(' req.query', req.query)
 
 		const filter = {};
 
@@ -804,9 +846,10 @@ exports.getAllDeliveries = async (req, res) => {
 
 exports.getDeliveryByOrderId = async (req, res) => {
 	try {
+
 		const { orderId } = req.params;
 
-		const delivery = await Delivery.findOne({ orderId }).lean();
+		const delivery = await Delivery.findOne({ orderId })
 
 		if (!delivery) {
 			return res.status(404).json({

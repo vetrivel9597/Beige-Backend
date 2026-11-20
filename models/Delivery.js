@@ -1,5 +1,5 @@
 
-import mongoose from "mongoose";
+const mongoose = require('mongoose');
 
 const DeliveryHistorySchema = new mongoose.Schema({
 
@@ -109,6 +109,5 @@ const DeliverySchema = new mongoose.Schema({
 });
 
 
-const Delivery = mongoose.model("Delivery", DeliverySchema);
+module.exports = mongoose.model("Delivery", DeliverySchema);
 
-export default Delivery;
