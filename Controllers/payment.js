@@ -400,6 +400,16 @@ exports.verify = async (req, res) => {
 };
 
 
+
+
+
+
+
+
+
+
+
+
 exports.createOrder = async (req, res) => {
 	try {
 		const { amount, userId } = req.body.data;
@@ -698,24 +708,6 @@ exports.pastOrder = async (req, res) => {
 		});
 	}
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 exports.createDelivery = async (req, res) => {

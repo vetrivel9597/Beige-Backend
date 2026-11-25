@@ -16,7 +16,6 @@ const session = require('express-session');
 
 var app = express();
 
-// ================= CORS CONFIGURATION =================
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
@@ -66,7 +65,6 @@ app.use(cors({
   ]
 }));
 
-// ================= MIDDLEWARE =================
 
 app.use(logger('dev'));
 app.use(express.json());
