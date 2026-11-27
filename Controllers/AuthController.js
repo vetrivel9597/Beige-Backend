@@ -256,7 +256,6 @@ exports.verifyOTP = async (req, res) => {
 
         if (type === "login") {
 
-            console.log('enter login type ')
 
             const otpRecord = await OTP.findOne({
                 email: normalizedEmail
@@ -305,18 +304,39 @@ exports.verifyOTP = async (req, res) => {
 
             const token = await generateToken(user);
 
+            // return res.status(200).json({
+            //     success: true,
+            //     message: "Login successful",
+            //     token,
+            //     user: {
+            //         id: user._id,
+            //         name: user.username,
+            //         email: user.email,
+            //         address: user.other_address?.[0]?.address || ""
+            //     },
+
+            // });
+
             return res.status(200).json({
                 success: true,
                 message: "Login successful",
                 token,
                 user: {
                     id: user._id,
-                    name: user.username,
+                    name: [user.username, user.lastname].filter(Boolean).join(" "),
+                    username: user.username,
+                    lastname: user.lastname,
                     email: user.email,
-                    address: user.other_address?.[0]?.address || ""
+                    mobile: user.mobile || "",
+                    dailCode: user.dailCode || "",
+                    dob: user.dob || "",
+                    gender: user.gender || "",
+                    default_address: user.default_address || "",
+                    address: user.default_address || user.other_address?.[0]?.address || "",
+                    other_address: user.other_address || [],
                 },
-
             });
+
         }
 
         return res.status(400).json({

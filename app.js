@@ -71,7 +71,6 @@ app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cookieParser());
 
-// ================= SITEMAP =================
 
 app.get('/sitemap.xml', async (req, res, next) => {
   try {
@@ -105,9 +104,24 @@ app.get('/sitemap.xml', async (req, res, next) => {
   }
 });
 
-// ================= STATIC FILES =================
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+
+// const PUBLIC_DIR = path.join(__dirname, "public");
+// const INVOICE_DIR = path.join(PUBLIC_DIR, "invoices");
+
+// if (!fs.existsSync(INVOICE_DIR)) {
+//   fs.mkdirSync(INVOICE_DIR, { recursive: true });
+// }
+
+// app.use(express.static(PUBLIC_DIR));
+
+// app.use(
+//   "/invoices",
+//   express.static(INVOICE_DIR)
+// );
+
 
 const reactBuild = path.join(
   __dirname,

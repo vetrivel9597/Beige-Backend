@@ -410,86 +410,101 @@ exports.verify = async (req, res) => {
 
 
 
+
 exports.createOrder = async (req, res) => {
 	try {
-		const { amount, userId } = req.body.data;
+		const { amount, userId } = req.body.data || {};
 
-
-		if (!amount || Number(amount) <= 0) {
+		if (
+			amount === undefined ||
+			amount === null ||
+			!Number.isFinite(Number(amount)) ||
+			Number(amount) <= 0
+		) {
 			return res.status(400).json({
 				success: false,
-				message: "Valid amount is required"
+				message: "Valid amount is required",
 			});
 		}
 
-		if (!userId) {
+		if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
 			return res.status(400).json({
 				success: false,
-				message: "User ID is required"
+				message: "Valid user ID is required",
 			});
 		}
 
-		const options = {
-			amount: Math.round(Number(amount) * 100),
-			currency: "INR",
-			receipt: `receipt_${Date.now()}`
-		};
+		const User = mongoose.model("User");
 
-		const razorpayOrder = await razorpay.orders.create(options);
+		const user = await User.findById(userId);
 
-
-
-		const existingDelivery = await Delivery.findOne({ orderId: razorpayOrder.id });
-
-		if (existingDelivery) {
-			return res.status(409).json({
+		if (!user) {
+			return res.status(404).json({
 				success: false,
-				message: "Delivery record already exists"
+				message: "User not found",
 			});
 		}
 
-		const invoiceId = `INV_${Date.now()}`;
+		const orderAmount = Number(Number(amount).toFixed(2));
+		const amountInPaise = Math.round(orderAmount * 100);
 
-		const paymentDetails = new PaymentDetail({
-			userId: userId,
-			orderId: razorpayOrder.id,
-			invoiceId: invoiceId,
-			amount: Number(amount),
+		const invoiceId = `INV-${Date.now()}`;
+
+		const razorpayOrder = await razorpay.orders.create({
+			amount: amountInPaise,
 			currency: "INR",
-			status: "created"
+			receipt: `receipt_${Date.now()}`,
+			notes: {
+				userId: String(userId),
+				invoiceId,
+			},
 		});
 
-		await paymentDetails.save();
+		const paymentDetails = await PaymentDetail.create({
+			userId,
+			orderId: razorpayOrder.id,
+			invoiceId,
+			amount: orderAmount,
+			currency: "INR",
+			status: "PENDING",
+		});
 
-		return res.status(200).json({
+		return res.status(201).json({
 			success: true,
 			message: "Payment order created successfully",
-			order: razorpayOrder,
-			invoiceId: invoiceId
+
+			data: {
+				razorpayOrderId: razorpayOrder.id,
+				amount: razorpayOrder.amount,
+				currency: razorpayOrder.currency,
+				receipt: razorpayOrder.receipt,
+				invoiceId,
+				paymentDetailId: paymentDetails._id,
+			},
 		});
 
 	} catch (error) {
-		console.log("Create Order Error:", error);
+		console.error("Create Order Error:", error);
 
 		return res.status(500).json({
 			success: false,
-			message: "Unable to create payment order"
+			message: "Unable to create payment order",
 		});
 	}
 };
 
 
+
 exports.verifyPayment = async (req, res) => {
 	try {
-
 		const {
 			razorpay_order_id,
 			razorpay_payment_id,
 			razorpay_signature,
-			orderData
-		} = req.body.data;
+			orderData,
+		} = req.body.data || {};
 
-
+	
 		if (
 			!razorpay_order_id ||
 			!razorpay_payment_id ||
@@ -498,163 +513,289 @@ exports.verifyPayment = async (req, res) => {
 		) {
 			return res.status(400).json({
 				success: false,
-				message: "Payment details and order data are required"
+				message: "Payment details and order data are required",
 			});
 		}
 
+		if (
+			!Array.isArray(orderData.product) ||
+			orderData.product.length === 0
+		) {
+			return res.status(400).json({
+				success: false,
+				message: "Order products are required",
+			});
+		}
+
+		if (
+			!orderData.delivery_Address ||
+			!orderData.delivery_Address.name ||
+			!orderData.delivery_Address.mobile ||
+			!orderData.delivery_Address.address
+		) {
+			return res.status(400).json({
+				success: false,
+				message: "Valid delivery address is required",
+			});
+		}
+
+	
+
 		const existingPayment = await PaymentDetail.findOne({
-			orderId: razorpay_order_id
+			orderId: razorpay_order_id,
 		});
-
-
 
 		if (!existingPayment) {
 			return res.status(404).json({
 				success: false,
-				message: "Payment record not found"
+				message: "Payment record not found",
 			});
 		}
 
-		if (existingPayment.status === "success") {
+	
+
+		const existingOrder = await Orders.findOne({
+			orderId: razorpay_order_id,
+		});
+
+		if (existingOrder) {
 			return res.status(200).json({
 				success: true,
-				message: "Payment already verified",
-				orderId: existingPayment.orderId
+				message: "Order already created successfully",
+				data: {
+					order: existingOrder,
+					payment: existingPayment,
+				},
 			});
 		}
 
-		const body = razorpay_order_id + "|" + razorpay_payment_id;
+		if (
+			existingPayment.status &&
+			existingPayment.status.toUpperCase() === "SUCCESS"
+		) {
+			return res.status(409).json({
+				success: false,
+				message: "Payment is successful but order record is missing. Please contact support.",
+			});
+		}
+
+		
+
+		const User = mongoose.model("User");
+
+		const user = await User.findById(existingPayment.userId);
+
+		if (!user) {
+			return res.status(404).json({
+				success: false,
+				message: "Payment user not found",
+			});
+		}
+
+
+
+		const body =
+			razorpay_order_id + "|" + razorpay_payment_id;
 
 		const expectedSignature = crypto
-			.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+			.createHmac(
+				"sha256",
+				process.env.RAZORPAY_KEY_SECRET
+			)
 			.update(body)
 			.digest("hex");
 
-		const expectedBuffer = Buffer.from(expectedSignature, "hex");
-		const receivedBuffer = Buffer.from(razorpay_signature, "hex");
+		if (!/^[a-fA-F0-9]{64}$/.test(razorpay_signature)) {
+			return res.status(400).json({
+				success: false,
+				message: "Invalid payment signature",
+			});
+		}
+
+		const expectedBuffer = Buffer.from(
+			expectedSignature,
+			"hex"
+		);
+
+		const receivedBuffer = Buffer.from(
+			razorpay_signature,
+			"hex"
+		);
 
 		const isAuthentic =
 			expectedBuffer.length === receivedBuffer.length &&
-			crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+			crypto.timingSafeEqual(
+				expectedBuffer,
+				receivedBuffer
+			);
 
 		if (!isAuthentic) {
 			return res.status(400).json({
 				success: false,
-				message: "Payment verification failed"
+				message: "Payment verification failed",
 			});
 		}
 
+	
 
 		const payment = await razorpay.payments.fetch(
 			razorpay_payment_id
 		);
 
+		if (payment.order_id !== razorpay_order_id) {
+			return res.status(400).json({
+				success: false,
+				message: "Payment order ID mismatch",
+			});
+		}
+
+		if (payment.status !== "captured") {
+			return res.status(400).json({
+				success: false,
+				message: "Payment is not captured",
+			});
+		}
+
+
+
+		const expectedAmount = Math.round(
+			Number(existingPayment.amount) * 100
+		);
 
 		if (
-			payment.order_id !== razorpay_order_id ||
-			payment.status !== "captured"
+			payment.amount !== expectedAmount ||
+			payment.currency !== existingPayment.currency
 		) {
 			return res.status(400).json({
 				success: false,
-				message: "Payment is not captured or order does not match"
+				message: "Payment amount or currency mismatch",
 			});
 		}
 
-
-		if (payment.amount !== Math.round(existingPayment.amount * 100)) {
-			return res.status(400).json({
-				success: false,
-				message: "Payment amount mismatch"
-			});
-		}
 
 
 		const invoiceId = existingPayment.invoiceId;
 
-
-		const newOrder = new Orders({
+		const newOrder = await Orders.create({
 			userid: existingPayment.userId,
 
 			orderId: razorpay_order_id,
 
-			invoiceId: invoiceId,
+			invoiceId,
+			
+			paymentDetailId: existingPayment._id,
 
 			product: orderData.product,
 
 			delivery_Address: orderData.delivery_Address,
 
-			productStatus: orderData.productStatus,
+			productStatus: "Confirmed",
 
-			shippingCharge: orderData.shippingCharge,
+			orderStatus: "CONFIRMED",
 
-			gstPercentage: orderData.gstPercentage,
+			paymentStatus: "PAID",
 
-			totalDiscount: orderData.totalDiscount,
+			paymentMethod: payment.method || "RAZORPAY",
 
-			amount: existingPayment.amount,
+			shippingCharge: Number(orderData.shippingCharge) || 0,
 
-			barcode: orderData.barcode,
+			gstPercentage: Number(orderData.gstPercentage) || 0,
 
-			couponDiscount: orderData.couponDiscount,
+			totalDiscount: Number(orderData.totalDiscount) || 0,
 
-			couponDiscountAmount: orderData.couponDiscountAmount,
+			amount: Number(existingPayment.amount),
 
-			promoCode: orderData.promoCode,
+			barcode:
+				orderData.barcode || `BC-${razorpay_order_id}`,
+
+			couponDiscount: Number(orderData.couponDiscount) || 0,
+
+			couponDiscountAmount:
+				Number(orderData.couponDiscountAmount) || 0,
+
+			promoCode: orderData.promoCode || "",
 
 			orderdate: new Date(),
 
-			deliveryDate: orderData.deliveryDate,
+			deliveryDate: null,
 
-			deliveryStatus: "Processing"
+			deliveryStatus: "Processing",
+
+			source: "WEBSITE",
+
+			subtotal: Number(orderData.subtotal) || 0,
+
+			taxAmount: Number(orderData.taxAmount) || 0,
+
+			statusHistory: [
+				{
+					status: "CONFIRMED",
+					comment: "Payment verified and order placed successfully",
+					changedBy: existingPayment.userId,
+					changedAt: new Date(),
+				},
+			],
 		});
 
-		await newOrder.save();
+	
 
-
-
-
-		const delivery = await Delivery.create({
+		let delivery = await Delivery.findOne({
 			orderId: razorpay_order_id,
-			userid: existingPayment.userId,
-			deliveryStatus: "Ordered",
-			statusHistory: [{
-				deliveryStatus: "Ordered",
-				message: "Your order has been placed successfully"
-			}]
 		});
 
-		await delivery.save();
+		if (!delivery) {
+			delivery = await Delivery.create({
+				orderId: razorpay_order_id,
 
+				userid: existingPayment.userId,
+
+				deliveryStatus: "Ordered",
+
+				statusHistory: [
+					{
+						deliveryStatus: "Ordered",
+						message: "Your order has been placed successfully",
+					},
+				],
+			});
+		}
+
+		
 
 		existingPayment.paymentId = razorpay_payment_id;
 
 		existingPayment.signature = razorpay_signature;
 
-		existingPayment.status = "success";
+		existingPayment.status = "SUCCESS";
 
 		existingPayment.invoice = invoiceId;
 
-		existingPayment.barcode = orderData.barcode;
+		existingPayment.barcode = newOrder.barcode;
 
 		await existingPayment.save();
+
+	
 
 		return res.status(200).json({
 			success: true,
 			message: "Payment verified and order created successfully",
-			paymentId: razorpay_payment_id,
-			order: newOrder
+
+			data: {
+				order: newOrder,
+				payment: existingPayment,
+				delivery,
+			},
 		});
 
 	} catch (error) {
-		console.log("Verify Payment Error:", error);
+		console.error("Verify Payment Error:", error);
 
 		return res.status(500).json({
 			success: false,
-			message: "Payment verification failed"
+			message: "Payment verification failed",
 		});
 	}
 };
-
 
 exports.pastOrder = async (req, res) => {
 	try {
