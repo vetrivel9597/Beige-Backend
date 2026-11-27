@@ -28,6 +28,10 @@ const WarehouseController = require("../Controllers/AdminController/WarehouseCon
 const SubAdminController = require("../Controllers/AdminController/SubAdminController");
 const stockAdjustmentController = require("../Controllers/AdminController/stockAdjustmentController");
 const expiryController = require("../Controllers/AdminController/expiryController");
+const OrderController = require("../Controllers/AdminController/OrderController");
+const ReturnController = require("../Controllers/AdminController/ReturnController");
+
+
 
 
 
@@ -245,9 +249,38 @@ router.get("/get-stock-movements", stockAdjustmentController.getStockMovements);
 
 
 
-router.get("/get-expiry-batches",expiryController.getExpiryBatches);
-router.get("/get-expiry-summary",expiryController.getExpirySummary);
-router.put("/mark-batch-expired/:id",expiryController.markBatchExpired);
+router.get("/get-expiry-batches", expiryController.getExpiryBatches);
+router.get("/get-expiry-summary", expiryController.getExpirySummary);
+router.put("/mark-batch-expired/:id", expiryController.markBatchExpired);
+
+
+
+
+router.get("/orders/get-orders", AuthAdmin, OrderController.getOrders);
+router.get("/orders/get-order/:id", AuthAdmin, OrderController.getOrder);
+router.post("/orders/confirm/:id", AuthAdmin, OrderController.confirmOrder);
+router.post("/orders/pack/:id", AuthAdmin, OrderController.packOrder);
+router.post("/orders/create-shipment/:id", AuthAdmin, OrderController.createShipment);
+router.post("/orders/deliver/:id", AuthAdmin, OrderController.deliverOrder);
+router.post("/orders/cancel/:id", AuthAdmin, OrderController.cancelOrder);
+router.post("/orders/add-note/:id", AuthAdmin, OrderController.addOrderNote);
+router.get("/orders/invoice/:id", AuthAdmin, OrderController.getOrderInvoice);
+router.get("/orders/packing-slip/:id", AuthAdmin, OrderController.getPackingSlip);
+
+
+
+
+
+router.get("/get-returns",AuthAdmin,ReturnController.getReturns);
+router.get("/get-return/:id",AuthAdmin,ReturnController.getReturnById);
+router.post("/approve/:id", AuthAdmin, ReturnController.approveReturn);
+router.post("/reject/:id",AuthAdmin,ReturnController.rejectReturn);
+router.post( "/schedule-pickup/:id",AuthAdmin,ReturnController.schedulePickup);
+router.post("/mark-received/:id",AuthAdmin,ReturnController.markReceived);
+router.post("/issue-refund/:id",AuthAdmin,ReturnController.issueRefund);
+router.post("/add-note/:id",AuthAdmin,ReturnController.addReturnNote);
+
+
 
 
 
